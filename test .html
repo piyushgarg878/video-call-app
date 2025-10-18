@@ -1,45 +1,204 @@
 <!DOCTYPE html>
-<html>
-  <body>
-    <h3>WebRTC Test</h3>
-    <video id="local" autoplay playsinline></video>
-    <video id="remote" autoplay playsinline></video>
-    <script>
-      const ws = new WebSocket("ws://localhost:5000/ws");
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WebRTC Multi-Peer Stable</title>
+  <style>
+    body {
+      background: #111;
+      color: #fff;
+      font-family: sans-serif;
+      text-align: center;
+    }
+    video {
+      width: 40%;
+      margin: 10px;
+      border-radius: 10px;
+      background: #000;
+      box-shadow: 0 0 8px #333;
+    }
+    button {
+      background: #333;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      margin: 5px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #remoteVideos {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+<body>
+  <h2>WebRTC Video Call Stable</h2>
+  <video id="localVideo" autoplay playsinline muted></video>
+  <div id="remoteVideos"></div>
 
-      const local = document.getElementById("local");
-      const remote = document.getElementById("remote");
+  <script>
+    const SIGNALING_URL = "ws://localhost:5000/ws";
+    const ROOM_ID = "123";
 
-      navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
-        local.srcObject = stream;
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
-      });
+    const ws = new WebSocket(SIGNALING_URL);
+    const peers = {};
+    const pendingCandidates = {};
+    const peerState = {}; // Track offerSent per peer
+    let localStream;
+    let mediaReadyResolve;
+    const mediaReady = new Promise(res => (mediaReadyResolve = res));
 
-      pc.ontrack = e => (remote.srcObject = e.streams[0]);
+    const localVideo = document.getElementById("localVideo");
+    const remoteContainer = document.getElementById("remoteVideos");
 
-      ws.onopen = async () => {
+    function log(...args) { console.log("[RTC]", ...args); }
+
+    // === STEP 1: Capture local media ===
+    async function initMedia() {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
+        log("Local stream ready:", localStream.getTracks().length, "tracks");
+        mediaReadyResolve();
+      } catch (err) {
+        console.error("getUserMedia failed:", err);
+        alert("Allow camera & microphone access");
+      }
+    }
+    initMedia();
+
+    // === STEP 2: WebSocket signaling ===
+    ws.onopen = () => {
+      log("[WS] Connected");
+      ws.send(JSON.stringify({ type: "join-room", room: ROOM_ID }));
+    };
+
+    ws.onmessage = async (event) => {
+      const msg = JSON.parse(event.data);
+      log("WS MSG:", msg);
+      const { type, data, target } = msg;
+      const peerId = data?.id || target;
+      await mediaReady;
+
+      if (!peerId) return;
+
+      if (!peers[peerId]) createPeerConnection(peerId);
+
+      const pc = peers[peerId];
+
+      if (type === "new-peer") {
+        log("New peer joined:", peerId);
+        peerState[peerId] = { offerSent: true };
+
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        ws.send(JSON.stringify({ type: "offer", data: offer }));
+        ws.send(JSON.stringify({ type: "offer", target: peerId, data: offer }));
+        log("Offer sent ->", peerId);
+      }
+
+      else if (type === "existing-peer") {
+        log("Existing peer present:", peerId);
+      }
+
+      else if (type === "offer") {
+        log("Received offer from", peerId);
+        peerState[peerId] = { offerSent: false };
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.data));
+
+        // Flush any buffered ICE candidates
+        if (pendingCandidates[peerId]) {
+          for (const c of pendingCandidates[peerId]) {
+            try { await pc.addIceCandidate(c); } catch (e) { console.warn(e); }
+          }
+          pendingCandidates[peerId] = [];
+        }
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: "answer", target: peerId, data: answer }));
+        log("Answer sent ->", peerId);
+      }
+
+      else if (type === "answer") {
+        if (!peerState[peerId]?.offerSent) {
+          log("Ignoring answer for", peerId, "no offer sent");
+          return;
+        }
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.data));
+        peerState[peerId].offerSent = false;
+
+        // Flush any buffered ICE candidates
+        if (pendingCandidates[peerId]) {
+          for (const c of pendingCandidates[peerId]) {
+            try { await pc.addIceCandidate(c); } catch (e) { console.warn(e); }
+          }
+          pendingCandidates[peerId] = [];
+        }
+        log("Remote description set for", peerId);
+      }
+
+      else if (type === "candidate") {
+        const candidate = new RTCIceCandidate(msg.data);
+        if (pc.remoteDescription) {
+          try { await pc.addIceCandidate(candidate); log("Added candidate for", peerId); }
+          catch (e) { console.warn("Candidate failed:", e); }
+        } else {
+          if (!pendingCandidates[peerId]) pendingCandidates[peerId] = [];
+          pendingCandidates[peerId].push(candidate);
+          log("Buffered candidate for", peerId);
+        }
+      }
+    };
+
+    // === STEP 3: Create PeerConnection ===
+    function createPeerConnection(peerId) {
+      log("Creating PeerConnection for", peerId);
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+      peers[peerId] = pc;
+      pendingCandidates[peerId] = [];
+
+      if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+      pc.ontrack = (event) => {
+        log("Remote track received from", peerId);
+        let video = document.getElementById(`remote-${peerId}`);
+        if (!video) {
+          video = document.createElement("video");
+          video.id = `remote-${peerId}`;
+          video.autoplay = true;
+          video.playsInline = true;
+          video.muted = true; // force autoplay
+          remoteContainer.appendChild(video);
+        }
+        video.srcObject = event.streams[0];
+
+        video.onloadedmetadata = () => {
+          const playPromise = video.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(err => {
+              console.warn("Autoplay blocked:", err);
+              const btn = document.createElement("button");
+              btn.innerText = `Play video from ${peerId}`;
+              btn.onclick = () => video.play().catch(e => console.error(e)); 
+              remoteContainer.appendChild(btn);
+            });
+          }
+        };
       };
 
-      ws.onmessage = async e => {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "answer") {
-          await pc.setRemoteDescription(msg.data);
-        } else if (msg.type === "candidate") {
-          await pc.addIceCandidate(msg.data);
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          ws.send(JSON.stringify({ type: "candidate", target: peerId, data: event.candidate }));
+          log("Sent ICE candidate ->", peerId);
         }
       };
 
-      pc.onicecandidate = e => {
-        if (e.candidate) {
-          ws.send(JSON.stringify({ type: "candidate", data: e.candidate }));
-        }
-      };
-    </script>
-  </body>
+      pc.oniceconnectionstatechange = () => log(peerId, "ICE state:", pc.iceConnectionState);
+
+      return pc;
+    }
+  </script>
+</body>
 </html>

@@ -14,6 +14,7 @@ func NewWSHandler(h *ws.Hub) *WSHandler {
 }
 
 func (h *WSHandler) Handle(c *websocket.Conn) {
+	// Use remote address as ID for simplicity
 	client := &ws.Client{
 		ID:   c.RemoteAddr().String(),
 		Conn: c,

@@ -20,7 +20,7 @@ func main() {
 
 	// MongoDB connection
 	ctx := context.Background()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb+srv://piyushgarg878_db_user:pg878@cluster0.corkolo.mongodb.net/"))
 	if err != nil {
 		log.Fatal("mongo connect error:", err)
 	}
