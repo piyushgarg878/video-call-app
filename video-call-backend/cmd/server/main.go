@@ -6,6 +6,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
+
 	"github.com/piyushgarg878/video-call-backend/internal/handlers"
 	"github.com/piyushgarg878/video-call-backend/internal/repositories"
 	"github.com/piyushgarg878/video-call-backend/internal/services"
@@ -14,21 +15,25 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-
-
 func main() {
 	app := fiber.New()
 
-	// MongoDB
-	ctx:=context.Background()
+	// MongoDB connection
+	ctx := context.Background()
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
-	db := client.Database("videoapp")
-	if err!=nil{
-		log.Fatal(err)
+	if err != nil {
+		log.Fatal("mongo connect error:", err)
 	}
-	defer client.Disconnect(ctx)
-	// Layers
-	repo := repository.NewMeetingRepo(db)
+	defer func() {
+		if err := client.Disconnect(ctx); err != nil {
+			log.Println("mongo disconnect error:", err)
+		}
+	}()
+
+	db := client.Database("videoapp")
+
+	// Layer setup
+	repo := repositories.NewMeetingRepo(db)
 	service := services.NewMeetingService(repo)
 	meetingHandler := handlers.NewMeetingHandler(service)
 
@@ -38,8 +43,15 @@ func main() {
 	// Routes
 	api := app.Group("/api")
 	api.Post("/meetings", meetingHandler.Create)
+	// Future: api.Get("/meetings/:id", meetingHandler.Get)
 
+	// WebSocket endpoint for signaling
 	app.Get("/ws", websocket.New(wsHandler.Handle))
+
+	// Simple health check
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.SendString("Video call backend is running 🚀")
+	})
 
 	log.Println("Server running on :5000")
 	log.Fatal(app.Listen(":5000"))

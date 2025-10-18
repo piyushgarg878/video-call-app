@@ -6,14 +6,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/piyushgarg878/video-call-backend/internal/models"
-    "github.com/piyushgarg878/video-call-backend/internal/repositories"
+	"github.com/piyushgarg878/video-call-backend/internal/repositories"
 )
 
 type MeetingService struct {
-	repo *repository.MeetingRepo
+	repo *repositories.MeetingRepo
 }
 
-func NewMeetingService(repo *repository.MeetingRepo) *MeetingService {
+func NewMeetingService(repo *repositories.MeetingRepo) *MeetingService {
 	return &MeetingService{repo: repo}
 }
 

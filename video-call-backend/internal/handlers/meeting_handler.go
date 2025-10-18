@@ -14,10 +14,13 @@ func NewMeetingHandler(s *services.MeetingService) *MeetingHandler {
 }
 
 func (h *MeetingHandler) Create(c *fiber.Ctx) error {
-	var req struct { Title string `json:"title"` }
+	var req struct {
+		Title string `json:"title"`
+	}
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
 	}
+
 	meeting, err := h.svc.CreateMeeting(c.Context(), req.Title, "demo-user")
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})

@@ -1,52 +1,35 @@
 package ws
 
-import (
-	"sync"
-
-	"github.com/piyushgarg878/video-call-backend/internal/models"
-)
+import "sync"
 
 type Hub struct {
-	rooms map[string]map[string]*models.Client
-	mu    sync.RWMutex
+	Rooms map[string]*Room
+	mu    sync.Mutex
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		rooms: make(map[string]map[string]*models.Client),
+		Rooms: make(map[string]*Room),
 	}
 }
 
-func (h *Hub) AddClient(roomID string, c *models.Client) {
+func (h *Hub) GetRoom(id string) *Room {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.rooms[roomID] == nil {
-		h.rooms[roomID] = make(map[string]*models.Client)
+
+	room, exists := h.Rooms[id]
+	if !exists {
+		room = NewRoom(id)
+		h.Rooms[id] = room
 	}
-	h.rooms[roomID][c.ID] = c
+	return room
 }
 
-func (h *Hub) RemoveClient(roomID, clientID string) {
+func (h *Hub) RemoveClientFromAllRooms(client *Client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if room, ok := h.rooms[roomID]; ok {
-		delete(room, clientID)
-		if len(room) == 0 {
-			delete(h.rooms, roomID)
-		}
-	}
-}
 
-func (h *Hub) Broadcast(roomID string, msg models.Message, exclude string) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if room, ok := h.rooms[roomID]; ok {
-		for id, c := range room {
-			if id == exclude { continue }
-			select {
-			case c.Send <- msg:
-			default:
-			}
-		}
+	for _, room := range h.Rooms {
+		room.RemoveClient(client)
 	}
 }

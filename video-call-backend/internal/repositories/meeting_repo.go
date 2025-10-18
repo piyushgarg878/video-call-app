@@ -1,11 +1,10 @@
-package repository
+package repositories
 
 import (
 	"context"
-
-	"github.com/piyushgarg878/video-call-backend/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"github.com/piyushgarg878/video-call-backend/internal/models"
 )
 
 type MeetingRepo struct {
